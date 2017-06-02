@@ -2,289 +2,533 @@
 #include <cctype>
 #include <cstdlib>
 #include <string>
+#include <vector>
 #include <deque>
 #include <stack>
 #include <map>
 
 using namespace std;
 
-#define LIMIT	0x80000000
+const string CS_ASN(":=");
+const string CS_AND("and");
+const string CS_OR("or");
+const string CS_TRUE("true");
+const string CS_FALSE("false");
+const string CS_IF("if");
+const string CS_THEN("then");
+const string CS_ELSE("else");
+const string CS_WHILE("while");
+const string CS_DO("do");
+const string CS_END(";");
 
-map<string, int> variable;
+typedef enum {
+    IT_OPERATOR,
+    IT_VARIABLE,
+    IT_BOOL,
+    IT_NUMBER,
+    IT_END,
+} ITYPE;
 
-struct Exp {
-    int type;
+struct Term {
+    ITYPE type;
 };
 
-struct Var : Exp {
-    string value;
+struct Operator : Term {
+    string v;
 };
 
-struct Num : Exp {
-    int number;
-}
-
-struct Assign : Exp {
+struct Variable : Term {
     string var;
-    Exp* value;
 };
 
-struct Opa : Exp {
-    char opt;
-    Exp* exp1;
-    Exp* exp2;
-}
+struct Number : Term {
+    int number;
+};
 
-struct Opb : Exp {
-    bool and_or;
-    Exp* exp1;
-    Exp* exp2;
-}
+struct Bool : Term {
+    bool t;
+};
 
-struct Opr : Exp{
-    bool bg_ls;
-    Exp* exp1;
-    Exp* exp2;
-}
-
-struct If : Exp{
-    Exp* pred;
-    Exp* cons;
-    Exp* altr;
-}
-
-struct While : Exp{
-    Exp* pred;
-    Exp* loop;
-}
+typedef vector<Term*> exp_vector;
+typedef vector<Term*>::size_type exp_index;
 
 
 /*
- * is variable?
+ * ast
  */
-inline bool is_variable?(string exp)
+typedef enum {
+    OPT_START,
+    OPT_ASSIGN,
+    OPT_IF,
+    OPT_WHILE,
+} OPTYPE;
+
+struct AST {
+    OPTYPE Type;
+    string lvalue;
+    pair<int, int> rvalue;
+    pair<int, int> pred;
+    AST* block1;
+    AST* block2;
+    AST* next;
+};
+
+
+/*
+ *  global environment
+ */
+map<string, int> environment;
+
+
+/*
+ *  inline helper function 
+ */
+inline bool is_variable(string exp)
 {
     return (!exp.empty() && isalpha(exp[0]));
 }
 
-
-/*
- * is number?
- */
-inline bool is_number?(string exp)
+inline bool is_number(string exp)
 {
-    return (!exp.empty() && !is_variable?(exp));
+    return (!exp.empty() && !is_variable(exp));
 }
 
-
-/*
- * to number
- */
 int to_number(string exp)
 {
     return atoi(exp.c_str());
 }
 
+inline bool is_space(char c)
+{
+    return c == ' ';
+}
 
-/*
- * skip space
- */
+inline bool is_linend(char c)
+{
+    return (c == ';') || (c == '\n');
+}
+
 inline void skip_space(
         int &i, 
         const int len,
         const string &exp)
 {
-    while (i < len && isspace(exp[i++]));
+    while (i < len && is_space(exp[i])) {
+        ++i;
+    }
 }
 
 
 /*
- * get item
+ *  get item , return false if exp end
  */
-void get_item(string exp, string &item, string &left)
+bool get_item(string exp, string &item, string &left)
 {
-    string::size i = 0, len = exp.size();
+    int i = 0, len = exp.size();
 
     item.clear();
     left.clear();
     skip_space(i, len, exp);
 
-    /* end of exp */
     if (i == len) {
-        return;
+        return false;
     }
 
-    while (i < len && !isspace(exp[i])) {
+    while (i < len && !is_space(exp[i]) && !is_linend(exp[i])) {
         item = item + exp[i];
         ++i;
     }
 
     skip_space(i, len, exp);
 
-    /* end of exp */
     if (i == len) {
-        return;
+        return false;
     }
 
-    /* ; */
-    if (exp[i] = ';') {
+    if (is_linend(exp[i])) {
         left = exp.substr(i+1);
+        return false;
     } else {
         left = exp.substr(i);
+        return true;
     }
 }
 
 
 /*
- * variable define v := S
+ *  environment
  */
-bool is_defination?(
-        string exp,
-        Exp *exp,
-        string &left)
+inline void set_variable_value(const string &v, int value)
 {
-    string left_exp, label;
-    
-    get_item(exp, variable, left_exp);
-    
-    if (!is_variable(variable)) {
-        return false;
+    environment[v] = value;
+}
+
+inline int get_variable_value(const string &v)
+{
+    return environment[v];
+}
+
+
+/*
+ *  parse_item
+ */
+Term* parse_item(string &exp, bool &still)
+{
+    Term* ast = NULL;
+
+    string left_exp = exp, item, label;
+    still = get_item(exp, item, left_exp);
+
+    // debug
+    cout << item << ' ';
+
+    if (item == CS_ASN || 
+        item == CS_AND ||
+        item == CS_OR  ||
+        item == CS_IF  ||
+        item == CS_THEN ||
+        item == CS_ELSE ||
+        item == CS_WHILE||
+        item == CS_DO  ||
+        item[0] == '+' ||
+        item[0] == '-' ||
+        item[0] == '*' ||
+        item[0] == '/' ||
+        item[0] == '<' ||
+        item[0] == '>' ||
+        item[0] == '(' ||
+        item[0] == ')' ||
+        item[0] == '{' ||
+        item[0] == '}')
+    {
+        Operator* itm = new Operator;
+        itm->type = IT_OPERATOR;
+        itm->v = item;
+        ast = itm;
+    } else if (item == CS_TRUE || item == CS_FALSE) {
+        Bool* bol = new Bool;
+        bol->type = IT_BOOL;
+        bol->t = item == CS_TRUE;
+        ast = bol;
+    } else if (is_variable(item)) {
+        Variable* var = new Variable;
+        var->type = IT_VARIABLE;
+        var->var = item;
+        ast = var;
+    } else if (is_number(item)) {
+        Number* num = new Number;
+        num->type = IT_NUMBER;
+        num->number = to_number(item);
+        ast = num;
     }
 
-    get_item(left_exp, label, left_exp);
+    exp = left_exp;
+    return ast;
+}
 
-    if (label != ":=") {
-        return false;
+
+/*
+ *  parser, split source code to terms
+ */
+bool parser(exp_vector& ast_queue, string& exp)
+{
+    static Term s_end;
+    s_end.type = IT_END;
+
+    while (!exp.empty()) {
+        bool still;
+        Term* item = parse_item(exp, still);
+        if (item) {
+            ast_queue.push_back(item);
+        }
+        if (!still) {
+            ast_queue.push_back(&s_end);
+
+            // debug
+            cout << ";" << endl;
+        }
     }
-
-    get_item(left_exp, value, left);
-
-    // execute value
-    // exp = variable + value
 
     return true;
 }
 
 
 /*
- *
+ *  make_ast
  */
+inline exp_index find_else(const exp_vector& ast_queue, exp_index start, exp_index end)
+{
+    while (start < end) {
+        Operator* opt = (Operator*)ast_queue[start];
+        if (opt->v == CS_ELSE) {
+            return start;
+        }
+        ++start;
+    }
+    return end;
+}
+inline exp_index find_then(const exp_vector& ast_queue, exp_index start, exp_index end)
+{
+    while (start < end) {
+        Operator* opt = (Operator*)ast_queue[start];
+        if (opt->v == CS_THEN) {
+            return start;
+        }
+        ++start;
+    }
+    return end;
+}
+
+inline exp_index find_do(const exp_vector& ast_queue, exp_index start, exp_index end)
+{
+    while (start < end) {
+        Operator* opt = (Operator*)ast_queue[start];
+        if (opt->v == CS_DO) {
+            return start;
+        }
+        ++start;
+    }
+    return end;
+}
+
+inline exp_index find_end(const exp_vector& ast_queue, exp_index start, exp_index end)
+{
+    while (start < end) {
+        Operator* opt = (Operator*)ast_queue[start];
+        if (opt->v == CS_END) {
+            return start;
+        }
+        ++start;
+    }
+    return end;
+}
+
+AST* make_ast(exp_vector& ast_queue, exp_index& start, const exp_index end)
+{
+    AST* ast_root = new AST;
+    ast_root->Type = OPT_START;
+
+    AST* last = ast_root;
+
+    string lvalue;
+
+    while (start < end) {
+        Term* item = ast_queue[start];
+        if (item->type == IT_VARIABLE) {
+            Variable* var = (Variable*)item;
+            lvalue = var->var;
+            ++start;
+        } else if (item->type == IT_OPERATOR) {
+            Operator* opt = (Operator*)item;
+            if (opt->v == CS_IF) { // if
+                exp_index next = find_then(ast_queue, start, end);
+                AST* item = new AST;
+                item->Type = OPT_IF;
+                item->next = NULL;
+                item->pred.first = start + 1;
+                item->pred.second = next;
+
+                last->next = item;
+                last = item;
+                start = next + 1;
+            } else if (opt->v == CS_WHILE) { // while
+                exp_index next = find_do(ast_queue, start, end);
+
+            } else if (opt->v == CS_ASN) { // assign
+                exp_index next = find_end(ast_queue, start, end);
+                AST* item = new AST;
+                item->Type = OPT_ASSIGN;
+                item->lvalue = lvalue;
+                item->rvalue.first = start + 1;
+                item->rvalue.second = next;
+                item->next = NULL;
+                last->next = item;
+                last = item;
+                start = next + 1;
+            } else {
+                // should be error!
+            }
+        } else /*IT_BOOL IT_NUMBER IT_END*/ {
+            lvalue.clear();
+            ++start;
+        }
+    }
+
+    return ast_root;
+}
 
 
 /*
- * basic execution use stack
+ *  weight, calculate expressions
  */
-int f(char fl)
+int weight(const Operator *exp)
 {
-    switch (fl) {
-        case '+':
-        case '-':
-            return 0;
-        case '*':
-        case '/':
-            return 1;
-        case '(':
-            return -1;
-        default:
-            return 2;
+    const string &s = exp->v;
+
+    if (s == CS_AND) {
+        return 0;
+    } else if (s == CS_OR) {
+        return 1;
+    } else if (s == ">" || s == "<") {
+        return 2;
+    } else if (s == "+" || s == "-") {
+        return 3;
+    } else if (s == "*" || s == "/") {
+        return 4;
+    } else if (s == "(") {
+        return -1;
+    } else {
+        return -2;
     }
 }
 
-int simple_execute(string s)
+int simple_execute(exp_vector &ast_queue, const exp_index start, const exp_index end)
 {
-	deque<int> t;
-	stack<int> q;
-	stack<int> v;
-	for (size_t i=0; i<s.size();) {
-        if (isspace(s[i])) {
-            ++i;
+	deque<Term*> temp;
+	stack<Term*> lque;
+	stack<int> ans;
+
+	for (exp_index i = start; i < end; ++i) {
+        Term* exp = ast_queue[i];
+
+        if (exp->type == IT_NUMBER || 
+            exp->type == IT_VARIABLE || 
+            exp->type == IT_BOOL) {
+                /* push back */
+                temp.push_back(exp);
+                continue;
+        } else if (exp->type == IT_END) {
             continue;
         }
-        if (isdigit(s[i])) {
-            int k = 0;
-            while (i < s.size() && isdigit(s[i])) {
-                k = k*10 + s[i] - '0';
-                ++i;
+
+		if (lque.empty()) {
+            lque.push(exp);
+            continue;
+		}
+
+        Operator* label = (Operator*)exp;
+
+		if (label->v == "(") {
+			lque.push(exp);
+			continue;
+		} else if (label->v == ")") {
+			while ((exp = lque.top()) && 
+                   (label = (Operator*)exp) &&
+                   (label->v != "(")) {
+                       temp.push_back(exp);
+                       lque.pop();
             }
-            t.push_back(k);
-            continue;
+            lque.pop();
+			continue;
+		}
+
+		while (!lque.empty() && 
+            weight((Operator*)lque.top()) >= weight(label)) {
+                temp.push_back(lque.top());
+                lque.pop();
         }
-		if (q.empty()) {
-			q.push(s[i++]);
-			continue;
-		}
-
-		if (s[i] == '(') {
-			q.push(s[i++]);
-			continue;
-		}
-
-		char tp;
-		if (s[i] == ')') {
-			while ((tp = q.top()) != '(') {
-				t.push_back(tp | LIMIT);
-				q.pop();
-			}
-			q.pop();
-			++i;
-			continue;
-		}
-
-		while (!q.empty() && f(q.top()) >= f(s[i])) {
-			t.push_back(q.top() | LIMIT);
-			q.pop();
-		}
-		q.push(s[i++]);
-	}
-	while (!q.empty()) {
-		t.push_back(q.top() | LIMIT);
-		q.pop();
+		lque.push(exp);
 	}
 
-	for (size_t i=0; i<t.size(); ++i) {
-		if (t[i] & LIMIT) {
-			char c = static_cast<char>(t[i] & ~LIMIT);
-			int a, b;
-			b = v.top();
-			v.pop();
-			if (v.empty()) {
+	while (!lque.empty()) {
+		temp.push_back(lque.top());
+		lque.pop();
+	}
+
+    for (deque<Term*>::size_type i = 0; i < temp.size(); ++i) {
+        Term* exp = temp[i];
+
+		if (exp->type == IT_OPERATOR) {
+            Operator* opt = (Operator*)exp;
+            const string& s = opt->v;
+
+			int a, b = ans.top();
+			ans.pop();
+			if (ans.empty()) {
 				a = 0;
 			} else {
-				a = v.top();
-				v.pop();
+				a = ans.top();
+				ans.pop();
 			}
-			switch (c) {
-				case '+':
-					v.push(a+b);
-					break;
-				case '-':
-					v.push(a-b);
-					break;
-				case '*':
-					v.push(a*b);
-					break;
-				case '/':
-					v.push(a/b);
-					break;
-				default:
-					break;
-			}
+
+            if (s == CS_AND) {
+                ans.push(a && b);
+            } else if (s == CS_OR) {
+                ans.push(a || b);
+            } else if (s == ">") {
+                ans.push(a > b);
+            } else if (s == "<") {
+                ans.push(a < b);
+            } else if (s == "+") {
+                ans.push(a + b);
+            } else if (s == "-") {
+                ans.push(a - b);
+            } else if (s == "*") {
+                ans.push(a * b);
+            } else if (s == "/") {
+                ans.push(a / b);
+            } else {
+                break;
+            }
 		} else {
-			v.push(t[i]);
+            if (exp->type == IT_NUMBER) {
+                Number* num = (Number*)exp;
+                ans.push(num->number);
+            } else if (exp->type == IT_VARIABLE) {
+                Variable* var = (Variable*)exp;
+                ans.push(get_variable_value((var)->var));
+            } else if (exp->type == IT_BOOL) {
+                Bool* bol = (Bool*)exp;
+                ans.push(bol->t);
+            } else {
+                break;
+            }
 		}
 	}
-	return v.top();
+	return ans.top();
+}
+
+
+/*
+ *  eval
+ */
+bool eval(string exp)
+{
+    exp_vector ast_queue;
+    parser(ast_queue, exp);
+
+    exp_index start = 0;
+    AST* ast_root = NULL;
+    ast_root = make_ast(ast_queue, start, ast_queue.size());
+
+    environment.clear();
+
+    return true;
+}
+
+void do_test()
+{
+    const char* s = "fact := 1 ;\
+                    val := 10000 ;\
+                    cur := val ;\
+                    mod := 1000000007 ;\
+                     \
+                    while ( cur > 1 ) \
+                    do \
+                    { \
+                    fact := fact * cur ;\
+                    fact := fact - fact / mod * mod ;\
+                    cur := cur - 1\
+                    } ;\
+                    cur := 0";
+
+    const char* rvalue = "3 - ( 451 + 2 ) - ( 2 * 99 ) ; ";
+    eval(s);
 }
 
 int main()
 {
-    string exp, s;
-    
-    while (cin >> s) {
-        exp += s;
-    }
+    do_test();
 
-    cout << simple_execute(exp) << endl;
     return 0;
 }
-
