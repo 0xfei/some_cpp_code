@@ -333,7 +333,15 @@ AST* make_ast(exp_vector& ast_queue, exp_index& start, const exp_index end)
                 start = next + 1;
             } else if (opt->v == CS_WHILE) { // while
                 exp_index next = find_do(ast_queue, start, end);
+                AST* item = new AST;
+                item->Type = OPT_WHILE;
+                item->next = NULL;
+                item->pred.first = start + 1;
+                item->pred.second = next;
 
+                last->next = item;
+                last = item;
+                start = next + 1;
             } else if (opt->v == CS_ASN) { // assign
                 exp_index next = find_end(ast_queue, start, end);
                 AST* item = new AST;
@@ -347,6 +355,7 @@ AST* make_ast(exp_vector& ast_queue, exp_index& start, const exp_index end)
                 start = next + 1;
             } else {
                 // should be error!
+                ++start;
             }
         } else /*IT_BOOL IT_NUMBER IT_END*/ {
             lvalue.clear();
