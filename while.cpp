@@ -665,9 +665,11 @@ void do_test()
             b := 100 ; \
             if ( a < b ) then\
             {\
-                    min := a ;\
-                    max := b\
-                }\
+                    min := a ; \
+                    max := b ; \
+                    if ( max < b ) then \
+                    { b := 99 ; } else { b := 77 } \
+            }\
             else {\
                 min := b ;\
                 max := a\
